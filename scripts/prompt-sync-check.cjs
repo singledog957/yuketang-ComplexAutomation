@@ -1,5 +1,6 @@
-// 断言 prompt 源文件与脚本内硬编码的 system 数组逐行一致（两份 prompt 都要过）：
+// 断言 prompt 源文件与脚本内硬编码的 system 数组逐行一致：
 //   Prompt/Homework.md 的 <AI识图作业Prompt> 区块 ↔ Solver.buildPrompt()
+//   Prompt/Written.md 的 <AI文本作业Prompt> 区块 ↔ Solver.buildWrittenPrompt()
 //   Prompt/Discussion.md 的 <AI讨论区Prompt> 区块 ↔ Solver.buildForumPrompt()
 // 用法：node scripts/prompt-sync-check.cjs（文件路径按脚本所在目录解析，跟 cwd 无关）
 const fs = require("fs");
@@ -51,6 +52,7 @@ const fileOfMarker = (marker) => {
 
 const cases = [
   { marker: "<AI识图作业Prompt>", fn: "buildPrompt" },
+  { marker: "<AI文本作业Prompt>", fn: "buildWrittenPrompt" },
   { marker: "<AI讨论区Prompt>", fn: "buildForumPrompt" },
 ].map(({ marker, fn }) => ({
   file: fileOfMarker(marker),

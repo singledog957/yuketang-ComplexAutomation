@@ -25,6 +25,7 @@
 
 - 主源码：`yuketang-ComplexAutomation.user.js`
 - AI 作业答题的 prompt 源（无需查看）：`Prompt/Homework.md`（正文在 `<AI识图作业Prompt> … </AI识图作业Prompt>` 之间，与脚本内 `Solver.buildPrompt()` 逐行一致，由 `scripts/prompt-sync-check.cjs` 检查）
+- 文本填空/主观题的 prompt 源（无需查看）：`Prompt/Written.md`（正文在 `<AI文本作业Prompt> … </AI文本作业Prompt>` 之间，与 `Solver.buildWrittenPrompt()` 逐行一致）
 - 讨论区回复的 prompt 源（无需查看）：`Prompt/Discussion.md`（正文在 `<AI讨论区Prompt> … </AI讨论区Prompt>` 之间，与脚本内 `Solver.buildForumPrompt()` 逐行一致，由同一个自测检查）
 - 仅作参考的代码：`ref/`
 
@@ -38,8 +39,8 @@ userscript 以 IIFE 形式在 `*.yuketang.cn` 页面以 `@run-at document-start`
 
 各目录用途固定，新文件放入对应目录：
 
-- `Prompt/`（**入库**）：prompt 源文本。`Homework.md`（作业答题，标记 `<AI识图作业Prompt>`）、`Discussion.md`（讨论区回复，标记 `<AI讨论区Prompt>`）。名字可以改、位置可以挪——`scripts/prompt-sync-check.cjs` 是按标记找文件的，不认文件名。
-- `scripts/`（**入库**）：可重复运行的检查脚本与开发工具。10 个 `*-selftest.cjs` 与 `prompt-sync-check.cjs` 按 `__dirname` 找主源码，从任意 cwd 都能跑；`ykt-ff/` 是 marionette 实机检测的三个脚本（`ykt-ff-start`、`ykt-ff-start-main`、`ykt-ff`），不在 PATH 上，从仓库根目录用 `scripts/ykt-ff/<名字>` 调用。新增检查脚本一律放这里。
+- `Prompt/`（**入库**）：prompt 源文本。`Homework.md`（截图作业，标记 `<AI识图作业Prompt>`）、`Written.md`（文本填空/主观题，标记 `<AI文本作业Prompt>`）、`Discussion.md`（讨论区回复，标记 `<AI讨论区Prompt>`）。名字可以改、位置可以挪——`scripts/prompt-sync-check.cjs` 是按标记找文件的，不认文件名。
+- `scripts/`（**入库**）：可重复运行的检查脚本与开发工具。`*-selftest.cjs` 与 `prompt-sync-check.cjs` 按 `__dirname` 找主源码，从任意 cwd 都能跑；`ykt-ff/` 是 marionette 实机检测的三个脚本（`ykt-ff-start`、`ykt-ff-start-main`、`ykt-ff`），不在 PATH 上，从仓库根目录用 `scripts/ykt-ff/<名字>` 调用。新增检查脚本一律放这里。
 - `tmp/`（**gitignore**）：本地诊断素材与一次性探针，留作以后参考。按来源分目录：`ai-captures/`（AI 请求抓取：prompt/请求体/题图）、`dom-samples/`（页面 DOM 片段）、`site-bundles/`（站点 chunk 抓取）、`font/`（字体反混淆与 html2canvas 排查：`exam_font.ttf`、`MAP_DATA.*`、截图、`font-*.cjs`）、`probes/`（一次性 DOM/网络探针）、`firefox-marionette/`（从 omni.ja 摘出的 marionette 协议源码，`ykt-ff` 就是照它写的）、`attic/`（旧提交草稿）、`ykt-firefox/`（专用 Firefox profile，198M，登录态跨重启保留；删掉只丢登录态，`ykt-ff-start` 会重建）。诊断脚本与它用的素材放同一个子目录，路径按 `__dirname` 找，不依赖 cwd。
 - 脚本产物只允许写到仓库内或 `/tmp`：需要留档的写 `tmp/<用途>/`，一次性的中转写 `/tmp`，**不要**在 `$HOME` 下新建目录或文件（Firefox 自己写的 `~/.mozilla`、`~/.cache/mozilla`、日常 profile 除外）。脚本里的路径一律按 `$(dirname "$0")/../..` 或 `import.meta.url` 解析到仓库根，不要写 `$HOME/...`。
 - `archive/`（**入库**）：冻结不改的历史。当前是 `dev-log/v1-to-v2/`（v1→v2 阶段的 LOG/WORKFLOW/AUDIT）。
@@ -91,7 +92,7 @@ userscript 以 IIFE 形式在 `*.yuketang.cn` 页面以 `@run-at document-start`
 - FailGate 用法：
   `FailGate\\.|ykt_fail_counts|clearPendingAutoStart`
 - AI 答题管线：
-  `captureQuestionImage|askAI|autoSelectAndSubmit|detectQuestionType|getOptionElements|buildPrompt|exerciseFingerprint|exerciseQuestionStillShown|advanceExerciseQuestion|hasExerciseSubmitControl`
+  `captureQuestionImage|getWrittenQuestionText|buildWrittenPrompt|parseWrittenAnswer|fillSubjectiveAnswer|askAI|autoSelectAndSubmit|detectQuestionType|getOptionElements|buildPrompt|exerciseFingerprint|exerciseQuestionStillShown|advanceExerciseQuestion|hasExerciseSubmitControl`
 - 题目文档与 iframe 跨越：
   `getExerciseDocument|getExerciseQuestionTabs|getExerciseQuestionBody|iframeExerciseId`
 - 讨论区回复：
@@ -99,7 +100,7 @@ userscript 以 IIFE 形式在 `*.yuketang.cn` 页面以 `@run-at document-start`
 - Pro 旧版游标与路由：
   `getProClassCount|setProClassCount|clearProClassCount|pro_lms_classCount`
 - 等待原语与本地自测：
-  `Utils.poll`、`node scripts/poll-selftest.cjs`、`node scripts/parse-answer-selftest.cjs`、`node scripts/prompt-sync-check.cjs`、`node scripts/failgate-selftest.cjs`、`node scripts/advance-selftest.cjs`、`node scripts/exercise-end-selftest.cjs`、`node scripts/exercise-answered-selftest.cjs`、`node scripts/stop-selftest.cjs`、`node scripts/forum-selftest.cjs`、`node scripts/completion-state-selftest.cjs`（这些脚本入库在 `scripts/`，按 `__dirname` 找主源码，从任意 cwd 跑结果相同）
+  `Utils.poll`、`node scripts/poll-selftest.cjs`、`node scripts/parse-answer-selftest.cjs`、`node scripts/prompt-sync-check.cjs`、`node scripts/written-answer-selftest.cjs`、`node scripts/ai-request-selftest.cjs`、`node scripts/ai-stream-selftest.cjs`、`node scripts/ai-timeout-selftest.cjs`、`node scripts/failgate-selftest.cjs`、`node scripts/advance-selftest.cjs`、`node scripts/exercise-end-selftest.cjs`、`node scripts/exercise-answered-selftest.cjs`、`node scripts/stop-selftest.cjs`、`node scripts/forum-selftest.cjs`、`node scripts/completion-state-selftest.cjs`（这些脚本入库在 `scripts/`，按 `__dirname` 找主源码，从任意 cwd 跑结果相同）
 
 写项目文档或解释时，引用这些关键词/命令，不要引用行号。
 
@@ -243,6 +244,8 @@ V2 视频不再在目录文档内就地重放：交棒的新标签 `AiWorkspaceR
 
 功能开关在 `Store.getFeatureConf()` 中。
 
+`textFirstWritten` 默认开启，只作用于填空/主观题：能读出有效题干且无图片/公式时先发文字；关闭后这些题也直接截图。无论开关如何，发送前都记录可读题目文本；文字答案无效时仅回退一次截图。
+
 `autoAI === false` 时，V2 顶层作业处理是有意的就地跳过：
 
 - 顶层作业类条目记录「AI 答题已禁用」，把条目标记为跳过，不进入条目继续扫描
@@ -292,16 +295,16 @@ ai-workspace 视频（`AiWorkspaceRunner.handleMedia`）中，xt 播放器真正
 
 ## Solver
 
-`Solver` 负责两件事：作业页基于截图的多模态答题，以及讨论区的纯文本回复生成。
+`Solver` 负责作业页的截图/文本答题，以及讨论区的纯文本回复生成。
 
 主流程：
 
-1. 用 `html2canvas` 截取题目图片。
-2. 必要时回退到 SVG `foreignObject` 截取。
-3. 检测题型。
+1. 检测题型；启用「填空/主观题优先发送文字」且题干 DOM 有有效文字、无图片/公式等视觉内容时，按空位顺序插入 `【空N】` 并用文本请求。每次发送前都在面板日志打印读取到的题目文字。
+2. 文字结果必须是题型匹配、答案非空且空位数量一致的 JSON；解析失败时用 `html2canvas` 截图回退，截图失败再用 SVG `foreignObject`。
+3. 主观题在 `.item-body .problem-body` 取题干，`buildWrittenPrompt()` 要求一个简短连续段落；优先经 UEditor `setContent` 写入编辑器，回读失败才尝试 iframe 编辑区。写入后短暂等待页面自动保存；没有可用的逐题提交控件时保持 `incomplete`，不把仅写入编辑器当作提交成功。`autoSelectAndSubmit` 必须排除「提交作业/交卷」整份作业按钮，不能把它当逐题提交。
 4. 通过分层选择器解析可见的选项容器/元素。
 5. 通过 `GM_xmlhttpRequest` 调用 OpenAI 兼容的多模态 API。
-   `askAI(imageDataUrl, { systemPrompt, userText } = {})`：不传 `userText` 时按作业答题处理——只传截图，题型与选项数均不下发给模型（prompt 是固定 system 文本，见 `buildPrompt()` 与 `Prompt/Homework.md`），由模型自行从图中判断题型。不要给 `askAI` 加回「把题型/选项数喂给模型」的参数——该参数无人读取；若确需下发，先改 prompt。传 `userText` 为纯文本请求（讨论区）：`system` 取 `systemPrompt`（`buildForumPrompt()`），user 消息里放 `{ type: "text" }` / `{ type: "input_text" }` 而不是图片 part。两条路共用同一套请求组装、流式、重试与 `StopGate` 中止逻辑，改动不要只改一条。
+   `askAI(imageDataUrl, { systemPrompt, userText } = {})`：不传 `userText` 时按截图答题处理，只传截图，题型与选项数均不下发给模型（`buildPrompt()` / `Prompt/Homework.md`）；文本填空/主观题用 `buildWrittenPrompt()` / `Prompt/Written.md`，讨论区用 `buildForumPrompt()` / `Prompt/Discussion.md`，两者都走 `userText` 的纯文本 part。各路径共用请求组装、流式、重试与 `StopGate` 中止逻辑。
 6. 解析模型响应并选择/提交答案。
 
 API 行为：
@@ -310,10 +313,13 @@ API 行为：
 - 鉴权头选择支持 `auto`、`bearer`、`x-api-key`、`api-key`。
 - 思考/推理选项与流式均可配置。
 - 手动 max tokens 被遵守；启用思考时自动 max tokens 更大。
+- Responses 流式 `response.output_text.delta` 只追加一次正文；`response.reasoning*` 仅计入推理，不混进最终回复。改流式解析后跑 `node scripts/ai-stream-selftest.cjs`。
+- 服务商可用模型以其 `/models` 返回为准：脚本默认 `gpt-4o-mini` 不保证在第三方服务存在。`model_not_found` 时面板提示检查模型设置；不要因某一家服务的列表改掉通用默认值。
+- `askAI()` 每次从 `Store.getAIConf()` 读取模型，发送前在面板日志打印实际 `model=`（不打印 Key）。流式 `GM_xmlhttpRequest` 省略原来的 `timeout: 0`，用 240 秒无新数据计时器（只在 `responseText` 真增长时重置）及 720 秒总时长上限；非流式仍用 `Config.aiTimeout=240000` 的原生超时。SSE 的 `response.created` 等元数据只能算一次数据进度，不能永久取消超时。计时器先 settle 再 abort，防止 `onabort` 抢先把错误变成「已终止」；手动终止即使脚本管理器不回调 `onabort` 也要立刻 settle。落定后清掉两个计时器、忽略晚到回调。改请求组装后跑 `node scripts/ai-request-selftest.cjs` 与 `node scripts/ai-timeout-selftest.cjs`。
 
-标准答题 prompt 是 `Prompt/Homework.md`（正文夹在 `<AI识图作业Prompt>` 标记之间）。若答题行为变化，检查并按需更新该文件，并同步编码到脚本（`node scripts/prompt-sync-check.cjs` 会按标记取正文逐行比对）。讨论区回复另有 `Prompt/Discussion.md`（正文夹在 `<AI讨论区Prompt>` 标记之间，由 `Solver.buildForumPrompt()` 硬编码，同一个自测守）。期望的最终模型输出是纯 JSON，如：
+截图答题 prompt 是 `Prompt/Homework.md`，文本作业 prompt 是 `Prompt/Written.md`，讨论区回复 prompt 是 `Prompt/Discussion.md`。均由 `node scripts/prompt-sync-check.cjs` 按标记逐行比对脚本内硬编码文本。期望的作业输出是纯 JSON，如：
 
-`{"type":"choice|multiple|truefalse|fillblank|refuse","answers":["A"]}`
+`{"type":"choice|multiple|truefalse|fillblank|subjective|refuse","answers":["A"]}`
 
 两条路各有各的拒答标记，别混用：作业是 JSON 里的 `{"type":"refuse"}`（`parseAIAnswer()` 归一成 `type: "refuse"`），讨论区是 prompt 约定的 `{refuse}`（`Solver.isRefuseReply()` 判定，容忍 `{"type":"refuse"}`、裸 `refuse`、以及「CoT Reasoning/Formal Response」两行示范格式）。`isRefuseReply` 只做标记匹配、不做语义判断，且要求整段就是那个标记，正文里顺带提到 refuse 不算拒答。
 

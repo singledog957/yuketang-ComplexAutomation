@@ -18,7 +18,7 @@
 - 批量章节自动展开，逐个处理内部视频、音频、图文、作业与讨论。
 - 讨论区（`taolun` / `forum`）读取教师正文，用文本请求让模型生成回复，填入回复框发表；关闭 AI 自动作答时改为跳过。
 - PPT / 课件自动翻页与播放。
-- 作业用浏览器内截图截取题面，通过 OpenAI 兼容接口调用多模态模型作答，支持选择题、多选题、判断题、填空题。
+- 作业支持选择题、多选题、判断题、填空题和主观题；填空/主观题可优先发送文字，文本答案格式不合格时回退题面截图。
 - 接口支持 Chat Completions 与 Responses 两种格式，自动补全端点；鉴权支持 Bearer、`x-api-key`、`api-key`，可自动识别。
 - 支持 thinking / CoT、流式传输与自定义 max tokens。
 - 字体反混淆常开（截图答题依赖）：题目文本被混淆字体做了字形置换，脚本还原后截图与复制才是真实文字。
@@ -26,9 +26,9 @@
 ## 文件
 
 - `yuketang-ComplexAutomation.user.js`：主 userscript，单文件交付。
-- `Prompt/`：两份 prompt 源文本（`Homework.md` 作业答题、`Discussion.md` 讨论区回复），与脚本里硬编码的 system 文本逐行一致。
+- `Prompt/`：三份 prompt 源文本（`Homework.md` 截图答题、`Written.md` 文本填空/主观题、`Discussion.md` 讨论区回复），与脚本里硬编码的 system 文本逐行一致。
 - `AGENTS.md`：面向 LLM Agent 的架构说明，开发者也可参考。
-- `scripts/`：开发期检查脚本（10 个 `*-selftest.cjs`、`prompt-sync-check.cjs`）与 `ykt-ff/`（marionette 实机检测：`ykt-ff-start` 启浏览器，`ykt-ff` 读写页面）。改动代码后按 `AGENTS.md` 的「必查项」跑。
+- `scripts/`：开发期检查脚本（`*-selftest.cjs`、`prompt-sync-check.cjs`）与 `ykt-ff/`（marionette 实机检测：`ykt-ff-start` 启浏览器，`ykt-ff` 读写页面）。改动代码后按 `AGENTS.md` 的「必查项」跑。
 - `tmp/`：本地诊断素材（页面抓取、站点 bundle、字体素材与截图、一次性探针），不入库。结构见 `AGENTS.md` 的「仓库结构」。
 - `archive/`：冻结的历史（当前是 `dev-log/v1-to-v2/` 的开发日志与审查报告）。
 - `ref/`：参考脚本来源，保留用于审计和对照。
@@ -39,7 +39,10 @@
 2. 打开 `yuketang-ComplexAutomation.user.js` 并安装脚本。
 3. 进入雨课堂课程目录页，点击脚本面板中的 `模型设置`。
 4. 填入 API URL、API Key、模型名称，按需调整接口格式、鉴权方式、最大 Token，以及 thinking、流式传输、自动作答。
+
 5. 点击 `开始`。
+
+「填空/主观题优先发送文字」默认开启：题面有可读文字且没有图片或公式时，先把题干与 `【空N】` 位置发给模型；每次请求前在日志显示题目文字。文本返回不是完整 JSON 或填空数量不符时自动改用截图。主观题要求简短连续正文，写入 UEditor 后仍需页面的逐题提交控件确认完成。
 
 面板按钮：
 
@@ -65,9 +68,12 @@ API URL 可以填完整端点，也可以只填域名或基础路径，脚本按
 默认行为：
 
 - thinking / CoT：开启。
-- stream：开启，60 秒无响应判定超时。
+- stream：开启，240 秒没有新回传判定超时，单次流式请求最长 720 秒。
+- 请求日志显示实际发送的 `model=`；超时日志会说明等待时长和是否已收到部分回传。
 - max tokens：留空自动选择，thinking 开启时 `32768`，关闭时 `4096`。
 - 不发送 `temperature` 与 `top_p`，由服务商默认值决定。
+
+如果出现 `model_not_found`，在模型设置中把默认的 `gpt-4o-mini` 改为当前服务商实际提供的模型。API URL 和 Key 可用并不代表默认模型可用；脚本的流式 Responses 正文现在按每个 delta 追加一次。
 
 ## 使用补充
 

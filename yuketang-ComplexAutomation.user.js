@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         雨课堂复合自动化
 // @namespace    https://github.com/nagelanping/yuketang-ComplexAutomation
-// @version      2.1.5
-// @description  雨课堂视频/PPT自动浏览 + OpenAI-compatible API 多模态LLM截图答题
+// @version      2.2.1
+// @description  雨课堂视频/PPT自动浏览 + OpenAI-compatible API 文字/截图答题
 // @author       Optance(nagelanping)
 // @license      GPL-3.0-only
 // @match        *://*.yuketang.cn/*
@@ -34,7 +34,7 @@
       "unknown",
     playbackRate: 2, // 视频播放倍速
     pptInterval: 3000, // ppt翻页间隔（毫秒）
-    aiTimeout: 240000, // 多模态模型请求超时（毫秒）
+    aiTimeout: 240000, // 非流式总超时；流式无新数据超时（毫秒）
     aiMaxRetry: 3, // 作业题目最大重试次数
     storageKeys: {
       // 使用者勿动
@@ -319,7 +319,10 @@
     getFeatureConf() {
       const raw = localStorage.getItem(Config.storageKeys.feature);
       const saved = Utils.safeJSONParse(raw, {}) || {};
-      return { autoAI: saved.autoAI ?? false };
+      return {
+        autoAI: saved.autoAI ?? false,
+        textFirstWritten: saved.textFirstWritten ?? true,
+      };
     },
     setFeatureConf(conf) {
       localStorage.setItem(Config.storageKeys.feature, JSON.stringify(conf));
@@ -849,7 +852,7 @@
               <div class="body">
                 <ul class="info" id="info">
                   <li>兼容雨课堂各版本课程页面，自动处理视频、音频与作业。</li>
-                  <li><strong>智能答题</strong>截取题面后交由多模态模型作答，无需 OCR。</li>
+                  <li><strong>智能答题</strong>填空/主观题可优先用文字，其余题目截取题面交由多模态模型作答。</li>
                   <li><strong>开始之前</strong>先在 <span class="tag">模型设置</span> 中填入 API Key 并启用自动作答。</li>
                   <li>配置完成后点击 <span class="tag">开始</span>，即可挂机处理视频与作业。</li>
                   <hr>
@@ -902,7 +905,7 @@
                 <div class="form-item">
                   <label class="checkbox-label">
                     <input type="checkbox" id="ai_stream">
-                    <span>流式传输，默认开启，60 秒无响应判定超时</span>
+                    <span>流式传输，默认开启，240 秒无新回传判定超时</span>
                   </label>
                 </div>
 
@@ -911,6 +914,12 @@
                   <label class="checkbox-label">
                     <input type="checkbox" id="feature_auto_ai">
                     <span>自动作答作业与题目</span>
+                  </label>
+                </div>
+                <div class="form-item">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="feature_text_first_written">
+                    <span>填空/主观题优先发送文字，解析失败再截图</span>
                   </label>
                 </div>
                 <div class="settings-footer">
@@ -952,6 +961,7 @@
       aiThinkingInput: doc.getElementById("ai_thinking"),
       aiStreamInput: doc.getElementById("ai_stream"),
       featureAutoAI: doc.getElementById("feature_auto_ai"),
+      featureTextFirstWritten: doc.getElementById("feature_text_first_written"),
       minimality: doc.getElementById("minimality"),
       miniBasic: doc.getElementById("mini-basic"),
     };
@@ -1109,6 +1119,7 @@
     const loadFeatureConf = () => {
       const saved = Store.getFeatureConf();
       ui.featureAutoAI.checked = saved.autoAI;
+      ui.featureTextFirstWritten.checked = saved.textFirstWritten;
     };
     loadAIConf();
     loadFeatureConf();
@@ -1137,6 +1148,7 @@
       Store.setAIConf(conf);
       const featureConf = {
         autoAI: ui.featureAutoAI.checked,
+        textFirstWritten: ui.featureTextFirstWritten.checked,
       };
       Store.setFeatureConf(featureConf);
       ui.settings.style.display = "none";
@@ -2719,6 +2731,44 @@
         img.src = url;
       });
     },
+    getWrittenQuestionText(itemBodyElement, questionType) {
+      const body = itemBodyElement?.querySelector?.(".item-body") || itemBodyElement;
+      const source = questionType === "subjective"
+        ? body?.querySelector?.(".problem-body") || body
+        : body;
+      if (!source) return { text: "", blankCount: 0, hasVisual: false };
+      const parts = [];
+      let blankCount = 0;
+      let hasVisual = false;
+      const visit = (node) => {
+        if (node.nodeType === 3) {
+          parts.push(node.textContent || "");
+          return;
+        }
+        if (node.nodeType !== 1) return;
+        const tag = node.tagName.toLowerCase();
+        if (/^(script|style|noscript|button)$/.test(tag) ||
+            node.matches?.(".editor-container, .attachment-upload, .subjective-remark")) return;
+        if (/^(img|svg|canvas|video)$/.test(tag) ||
+            node.matches?.(".MathJax, .katex")) {
+          hasVisual = true;
+          return;
+        }
+        if (tag === "input" && (node.type === "text" || !node.type)) {
+          parts.push(`【空${++blankCount}】`);
+          return;
+        }
+        if (tag === "br") {
+          parts.push(" ");
+          return;
+        }
+        for (const child of node.childNodes) visit(child);
+        if (/^(div|p|li|tr)$/.test(tag)) parts.push(" ");
+      };
+      visit(source);
+      const text = parts.join("").replace(/\s+/g, " ").trim();
+      return { text, blankCount, hasVisual };
+    },
     getVisibleOptionCount(itemBodyElement) {
       const container = this.getOptionContainer(itemBodyElement);
       if (!container) return 0;
@@ -2855,17 +2905,18 @@
         "",
         "请仔细观察截图，并按以下规则处理：",
         "",
-        "1. **识别题型**：判定题目属于以下四种类型之一：`choice`（单选题）、`multiple`（多选题）、`truefalse`（判断题）、`fillblank`（填空题）。",
+        "1. **识别题型**：判定题目属于以下五种类型之一：`choice`（单选题）、`multiple`（多选题）、`truefalse`（判断题）、`fillblank`（填空题）、`subjective`（主观题）。",
         "2. **提取与映射答案**：",
         "   - **选择题 (choice / multiple)**：严格按截图中选项的排列顺序（从上到下，或从左到右），将其依次映射为 A, B, C, D, E, F 等字母，并提取正确选项。",
         "   - **判断题 (truefalse)**：优先寻找截图中“正确/错误/对/错”所对应的选项字母进行输出；若截图中没有选项字母，则直接输出“对”或“错”。",
         "   - **填空题 (fillblank)**：按照题目留空的先后顺序，依次提取或计算出对应的答案文本。",
+        "   - **主观题 (subjective)**：直接回答题目要求。用一段连续、简短的正文，不要分点、列序号或写标题；`answers` 只放一个字符串。",
         "",
         "## 输出约束",
         "",
         "- **格式要求**：只输出一个纯 JSON 对象，**绝对禁止**使用 Markdown 格式，**禁止**输出 ```json 这样的代码块，**禁止**包含任何前言、后语或解释。",
         "- **JSON Schema**：",
-        '  {"type":"choice|multiple|truefalse|fillblank|refuse","answers":["A"]}',
+        '  {"type":"choice|multiple|truefalse|fillblank|subjective|refuse","answers":["A"]}',
         "  - type = refuse 时不输出 answers",
         "- **字段限制**：`answers` 数组中仅包含纯粹的答案值，不得包含题号、解析说明。",
         "- **基调与风格**：直接、精确、保守；不解释，不展示推理过程。",
@@ -2936,6 +2987,28 @@
         "",
         "CoT Reasoning: 根据截图要求尝试访问链接，尝试调用网络工具。失败，确认当前环境无联网能力，无法完成题目要求，无法作答，如实返回 refuse",
         'Formal Response: {"type":"refuse"}',
+      ].join("\n");
+      return { system };
+    },
+    buildWrittenPrompt() {
+      const system = [
+        "# 任务",
+        "",
+        "根据用户提供的题目文字作答。题目文字中的【空1】、【空2】等是按顺序排列的填空位置。不要假设还有图片、附件或未给出的上下文；无法据此作答时返回拒答。",
+        "",
+        "# 填空题",
+        "",
+        "按空位顺序给出答案，每个空位对应 answers 中的一个字符串。只写应填入输入框的内容，不重复题干。",
+        "",
+        "# 主观题",
+        "",
+        "直接回答问题。用一段连续、简短的正文，不要分点、列序号、写标题或寒暄。通常控制在 150 个汉字以内；题目明确要求更多内容时按题目要求作答。answers 只放一个字符串。",
+        "",
+        "# 输出",
+        "",
+        "只输出一个纯 JSON 对象，不使用 Markdown 或解释：",
+        '{"type":"fillblank|subjective","answers":["答案"]}',
+        '无法作答时只输出 {"type":"refuse"}，不带 answers。不要把示例或推理过程写进最终答案。',
       ].join("\n");
       return { system };
     },
@@ -3131,27 +3204,30 @@
                 ...thinkingParams,
               };
         panel.log(
-          `请求${userText ? "文本" : "多模态"}模型：${API_URL}，${saved.stream ? "stream" : "non-stream"}，thinking=${saved.thinkingEnabled ? "on" : "off"}，max_tokens=${maxOutputTokens}`,
+          `请求${userText ? "文本" : "多模态"}模型：${API_URL}，model=${MODEL_NAME}，${saved.stream ? "stream" : "non-stream"}，thinking=${saved.thinkingEnabled ? "on" : "off"}，max_tokens=${maxOutputTokens}`,
         );
+        const requestStartedAt = Date.now();
         let settled = false;
         let requestHandle = null;
-        let firstChunkTimer = null;
-        const streamFirstChunkTimeout = Math.max(
+        let streamIdleTimer = null;
+        let streamTotalTimer = null;
+        const streamIdleTimeout = Math.max(
           Number(Config.aiTimeout || 0),
           60000,
         );
-        const cleanupFirstChunkTimer = () => {
-          if (firstChunkTimer) {
-            clearTimeout(firstChunkTimer);
-            firstChunkTimer = null;
-          }
+        const streamTotalTimeout = streamIdleTimeout * 3;
+        const cleanupStreamTimers = () => {
+          if (streamIdleTimer) clearTimeout(streamIdleTimer);
+          if (streamTotalTimer) clearTimeout(streamTotalTimer);
+          streamIdleTimer = null;
+          streamTotalTimer = null;
         };
         const settleResolve = (value) => {
           if (settled) return;
           settled = true;
           if (StopGate.abortInflight === abortInflight)
             StopGate.abortInflight = null;
-          cleanupFirstChunkTimer();
+          cleanupStreamTimers();
           resolve(value);
         };
         const settleReject = (err) => {
@@ -3159,14 +3235,31 @@
           settled = true;
           if (StopGate.abortInflight === abortInflight)
             StopGate.abortInflight = null;
-          cleanupFirstChunkTimer();
+          cleanupStreamTimers();
           reject(err);
         };
         // 终止闸门要能在请求在途时把它掐掉：句柄挂在 StopGate 上，落定后清掉（避免误 abort 后来的请求）
         const abortInflight = () => {
+          settleReject("已终止");
           try {
             requestHandle && requestHandle.abort && requestHandle.abort();
           } catch (_) {}
+        };
+        const failTimedOut = (reason) => {
+          if (settled) return;
+          settleReject(reason);
+          try {
+            requestHandle?.abort?.();
+          } catch (_) {
+            // 请求已落定时中止失败无需再处理
+          }
+        };
+        const resetStreamIdleTimer = () => {
+          if (streamIdleTimer) clearTimeout(streamIdleTimer);
+          streamIdleTimer = setTimeout(() =>
+            failTimedOut(
+              `流式请求 ${Math.round(streamIdleTimeout / 1000)} 秒没有新回传（${streamState.firstChunkReceived ? "已收到部分回传" : "尚未收到首个回传"}）`,
+            ), streamIdleTimeout);
         };
         StopGate.abortInflight = abortInflight;
         const request = {
@@ -3174,16 +3267,25 @@
           url: API_URL,
           headers,
           data: JSON.stringify(payload),
-          timeout: saved.stream ? 0 : Config.aiTimeout,
+          // 流式用无新数据 + 总时长计时器；不要传 timeout: 0 给脚本管理器。
+          ...(!saved.stream ? { timeout: Config.aiTimeout } : {}),
           onload: (res) => {
-            cleanupFirstChunkTimer();
+            if (settled) return;
             // 已终止：模型可能刚好在这一刻返回，丢弃响应，不再往下解析（更不再选答案/提交）
             if (StopGate.isStopped()) {
               settleReject("已终止");
               return;
             }
             if (res.status < 200 || res.status >= 300) {
-              const err = `请求失败: HTTP ${res.status} - ${(res.responseText || "").slice(0, 300)}`;
+              let hint = "";
+              try {
+                const apiError = JSON.parse(res.responseText || "{}").error;
+                if (apiError?.type === "model_not_found")
+                  hint = `；当前模型 ${MODEL_NAME} 不可用，请在模型设置中填写服务商支持的模型`;
+              } catch (_) {
+                // 非 JSON 错误响应照原文记录
+              }
+              const err = `请求失败: HTTP ${res.status} - ${(res.responseText || "").slice(0, 300)}${hint}`;
               panel.log(err, "error");
               settleReject(err);
               return;
@@ -3237,17 +3339,21 @@
             settleReject(StopGate.isStopped() ? "已终止" : "网络错误"),
           // abort 由终止闸门触发：走这里收口，调用方看到「已终止」不再重试
           onabort: () => settleReject("已终止"),
-          ontimeout: () => settleReject("请求超时"),
+          ontimeout: () =>
+            settleReject(
+              `请求超时（${Math.round((Date.now() - requestStartedAt) / 1000)} 秒，${streamState?.firstChunkReceived ? "已收到流式回传" : "尚未收到流式回传"}）`,
+            ),
         };
         if (saved.stream) {
           request.onprogress = (res) => {
-            if (StopGate.isStopped()) return; // 已终止：丢弃在途分片
-            if (res.responseText && !streamState.firstChunkReceived) {
+            if (settled || StopGate.isStopped()) return; // 已终止/超时：丢弃在途分片
+            const responseText = res.responseText || "";
+            if (responseText.length > streamState.offset) resetStreamIdleTimer();
+            if (responseText && !streamState.firstChunkReceived) {
               streamState.firstChunkReceived = true;
-              cleanupFirstChunkTimer();
               panel.log("流式响应已收到首个回传，继续等待模型输出完成...");
             }
-            this.consumeStreamChunk(streamState, res.responseText || "");
+            this.consumeStreamChunk(streamState, responseText);
             const partial =
               this.extractUsableJsonText(streamState.content) ||
               this.extractUsableJsonText(streamState.reasoning);
@@ -3259,19 +3365,16 @@
               panel.log("流式响应正在输出 thinking/reasoning...");
             }
           };
-          firstChunkTimer = setTimeout(() => {
-            if (streamState.firstChunkReceived) return;
-            try {
-              requestHandle?.abort?.();
-            } catch (_) {
-              // ignore abort failures
-            }
-            settleReject(
-              `流式请求首字延迟超过 ${Math.round(streamFirstChunkTimeout / 1000)} 秒：服务端未开始回传`,
-            );
-          }, streamFirstChunkTimeout);
+          resetStreamIdleTimer();
+          streamTotalTimer = setTimeout(() =>
+            failTimedOut(`流式请求总耗时超过 ${Math.round(streamTotalTimeout / 1000)} 秒`),
+          streamTotalTimeout);
         }
-        requestHandle = GM_xmlhttpRequest(request);
+        try {
+          requestHandle = GM_xmlhttpRequest(request);
+        } catch (err) {
+          settleReject(`请求启动失败：${err?.message || err}`);
+        }
       });
     },
     createStreamState() {
@@ -3321,6 +3424,17 @@
     },
     consumeStreamEvent(state, event, eventName = "") {
       if (!state || !event) return;
+      const type = event.type || eventName;
+      // Responses 的 delta 也是下面通用 event.delta 的候选值，不能追加两次。
+      // reasoning 分片也不能落进最终正文，否则讨论区会发表推理内容。
+      if (type === "response.output_text.delta") {
+        state.content += typeof event.delta === "string" ? event.delta : "";
+        return;
+      }
+      if (/^response\.reasoning(?:_|\.)/.test(type)) {
+        state.reasoning += event.delta || event.text || "";
+        return;
+      }
       const choice = event.choices?.[0];
       const delta = choice?.delta || choice?.message || {};
       const content =
@@ -3337,13 +3451,6 @@
         this.flattenContent(event.reasoning) ||
         this.flattenContent(event.summary);
       if (reasoning) state.reasoning += reasoning;
-
-      if (/response\.output_text\.delta/.test(event.type || eventName)) {
-        state.content += event.delta || "";
-      }
-      if (/response\.(reasoning|output_item)\./.test(event.type || eventName)) {
-        state.reasoning += event.delta || event.text || "";
-      }
     },
     extractStreamText(state) {
       if (!state) return "";
@@ -3432,6 +3539,7 @@
           ?.querySelector(".item-type") ||
         itemBodyElement.closest(".problem-wrap")?.querySelector(".item-type");
       const typeText = typeEl?.innerText?.trim() || "";
+      if (/主观|简答|论述/.test(typeText)) return "subjective";
       if (/填空/.test(typeText)) return "fillblank";
       if (/判断/.test(typeText)) return "truefalse";
       if (/多选/.test(typeText)) return "multiple";
@@ -3450,6 +3558,76 @@
       ).length;
       if (checkboxCount > 0) return "multiple";
       return "choice";
+    },
+
+    parseWrittenAnswer(raw, questionType, blankCount = 0) {
+      const text = String(raw || "")
+        .trim()
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```$/, "");
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch (_) {
+        return null;
+      }
+      if (!parsed || Array.isArray(parsed) || typeof parsed !== "object")
+        return null;
+      if (parsed.type === "refuse") return parsed;
+      if (parsed.type !== questionType || !Array.isArray(parsed.answers))
+        return null;
+      const answers = parsed.answers.map((answer) =>
+        typeof answer === "string" ? answer.trim() : "",
+      );
+      if (answers.some((answer) => !answer)) return null;
+      if (questionType === "fillblank" &&
+          (!blankCount || answers.length !== blankCount)) return null;
+      if (questionType === "subjective" && answers.length !== 1) return null;
+      return { type: questionType, answers };
+    },
+
+    async fillSubjectiveAnswer(answer, itemBodyElement) {
+      const text = String(answer || "").trim();
+      if (!text) return false;
+      const container = itemBodyElement.querySelector(".item-body .editor-container");
+      if (!container) {
+        panel.log("未找到主观题编辑器", "warning");
+        return false;
+      }
+      const editorId = container.querySelector('[id^="ueditor-"]')?.id;
+      try {
+        const editor = editorId && unsafeWindow.UE?.getEditor?.(editorId);
+        if (editor?.setContent) {
+          const safeHtml = text.replace(/&/g, "&amp;").replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+          editor.setContent(`<p>${safeHtml}</p>`);
+          if (editor.getContentTxt?.().trim() === text) {
+            panel.log(`AI 建议主观题：${text}`);
+            await Utils.sleep(800);
+            return true;
+          }
+        }
+      } catch (err) {
+        panel.log(`UEditor 写入失败，尝试编辑区：${err?.message || err}`, "warning");
+      }
+      const frame = container.querySelector("iframe");
+      const body = frame?.contentDocument?.body;
+      if (!body?.isContentEditable) {
+        panel.log("主观题编辑区尚未就绪", "warning");
+        return false;
+      }
+      body.textContent = text;
+      body.dispatchEvent(new frame.contentWindow.Event("input", { bubbles: true }));
+      body.dispatchEvent(new frame.contentWindow.Event("change", { bubbles: true }));
+      body.dispatchEvent(new frame.contentWindow.Event("blur", { bubbles: true }));
+      const written = body.innerText?.trim() === text;
+      if (written) {
+        panel.log(`AI 建议主观题：${text}`);
+        await Utils.sleep(800);
+      } else {
+        panel.log("主观题答案写入后回读不一致", "warning");
+      }
+      return written;
     },
 
     async fillBlanks(answerData, itemBodyElement) {
@@ -3487,7 +3665,7 @@
 
       if (!inputs.length) {
         panel.log("未找到填空输入框", "warning");
-        return;
+        return false;
       }
       panel.log(`AI 建议填空：${answers.join("；")}`);
       for (let i = 0; i < inputs.length; i++) {
@@ -3506,6 +3684,10 @@
         input.blur();
         await Utils.sleep(300);
       }
+      return inputs.every((input, i) =>
+        (input.isContentEditable ? input.innerText : input.value) ===
+        (answers[i] || answers[answers.length - 1] || ""),
+      );
     },
 
     parseAIAnswer(aiResponse, questionType) {
@@ -3538,6 +3720,8 @@
       } catch (_) {
         // fall through
       }
+      if (questionType === "subjective")
+        return { type: questionType, answers: [], raw };
       if (questionType === "fillblank") {
         const m = raw.match(/(?:正确)?答案[：:]?\s*(.+)/i);
         return {
@@ -3632,7 +3816,12 @@
           panel.log("未提取到填空答案，请人工检查", "warning");
           return "incomplete";
         }
-        await this.fillBlanks(parsed.answers, itemBodyElement);
+        if (!(await this.fillBlanks(parsed.answers, itemBodyElement)))
+          return "incomplete";
+      } else if (questionType === "subjective") {
+        if (parsed.answers.length !== 1 ||
+            !(await this.fillSubjectiveAnswer(parsed.answers[0], itemBodyElement)))
+          return "incomplete";
       } else {
         const listContainer = this.getOptionContainer(itemBodyElement);
         if (!listContainer) {
@@ -3669,7 +3858,8 @@
           itemBodyElement,
           ownerDocument,
         ].filter(Boolean);
-        const matchText = (text) => /提交|保存|确认|确定|提交答案/.test(text);
+        const matchText = (text) =>
+          /提交|保存|确认|确定/.test(text) && !/作业|交卷/.test(text);
         for (const root of roots) {
           const local = root.querySelectorAll(
             'button, .el-button, [role="button"]',
@@ -4933,7 +5123,7 @@
 
       const questionType = Solver.detectQuestionType(questionRoot);
       let optionCount = 0;
-      if (questionType !== "fillblank") {
+      if (questionType !== "fillblank" && questionType !== "subjective") {
         optionCount = Solver.getVisibleOptionCount(questionRoot);
         if (!optionCount) {
           this.panel.log(`${label || "当前题目"} 未找到选项，跳过`, "warning");
@@ -4950,9 +5140,40 @@
               `${label || "当前题目"} 重试 ${retryCount}/${maxRetry - 1}`,
               "warning",
             );
-          const imageDataUrl = await Solver.captureQuestionImage(questionRoot);
-          this.panel.log("请求多模态 AI 获取答案...");
-          const aiText = await Solver.askAI(imageDataUrl);
+          const written = Solver.getWrittenQuestionText(questionRoot, questionType);
+          const textFirst = Store.getFeatureConf().textFirstWritten &&
+            (questionType === "fillblank" || questionType === "subjective") &&
+            written.text.replace(/【空\d+】/g, "").length >= 8 &&
+            !written.hasVisual &&
+            (questionType !== "fillblank" || written.blankCount > 0);
+          let aiText = "";
+          if (textFirst) {
+            this.panel.log(`题目文本：${written.text}`);
+            this.panel.log("优先用文字请求 AI 获取答案...");
+            try {
+              const response = await Solver.askAI(null, {
+                systemPrompt: Solver.buildWrittenPrompt().system,
+                userText: `${questionType === "subjective" ? "主观题" : "填空题"}：${written.text}`,
+              });
+              if (Solver.parseWrittenAnswer(response, questionType, written.blankCount)) {
+                aiText = response;
+              } else {
+                this.panel.log("文字答案格式或空位数量不符，改用题面截图", "warning");
+              }
+            } catch (err) {
+              if (!/JSON 解析失败|AI 响应为空/.test(String(err))) throw err;
+              this.panel.log(`文字响应无法解析（${err}），改用题面截图`, "warning");
+            }
+          }
+          if (!aiText) {
+            this.panel.log(`题目文本：${written.text || "（未读取到有效文本）"}`);
+            const captureTarget = questionType === "subjective"
+              ? questionRoot.querySelector(".item-body .problem-body") || questionRoot
+              : questionRoot;
+            const imageDataUrl = await Solver.captureQuestionImage(captureTarget);
+            this.panel.log("请求多模态 AI 获取答案...");
+            aiText = await Solver.askAI(imageDataUrl);
+          }
           // 终止可能就发生在等模型这段时间里：拿到回复也不往下走（否则会继续选答案、点提交）
           if (StopGate.isStopped()) return false;
           const result = await Solver.autoSelectAndSubmit(aiText, questionRoot);

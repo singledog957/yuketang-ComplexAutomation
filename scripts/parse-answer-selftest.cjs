@@ -4,7 +4,7 @@
 const fs = require("fs");
 const assert = require("assert");
 
-const src = fs.readFileSync(__dirname + "/../yuketang-ComplexAutomation.user.js", "utf8");
+const src = fs.readFileSync(__dirname + "/../yuketang-ComplexAutomation.user.js", "utf8").replace(/\r\n/g, "\n");
 const grab = (name, args) => {
   const m = src.match(
     new RegExp(`\\n {4}${name}\\(${args}\\) \\{[\\s\\S]*?\\n {4}\\},\\n`),
