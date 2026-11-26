@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         雨课堂复合自动化
 // @namespace    https://github.com/nagelanping/yuketang-ComplexAutomation
-// @version      2.3.1
+// @version      2.3.2
 // @description  雨课堂视频/PPT自动浏览 + 题库优先、AI 兜底答题
 // @author       Optance(nagelanping), SingleDog
 // @license      GPL-3.0-only
@@ -3913,6 +3913,16 @@
     cache: new Map(),
 
     readCourse(doc, search = "") {
+      const matchNames = (names) => {
+        const matches = this.courses.filter((course) => names.some((name) =>
+          String(name || "").replace(/\s/g, "").includes(course),
+        ));
+        return matches.length === 1 ? matches[0] : "";
+      };
+      const header = doc.querySelector(".learning-space-header__primary");
+      const headerName = header?.innerText?.trim() || header?.textContent?.trim();
+      if (headerName) return matchNames([headerName]);
+
       const query = new URLSearchParams(search);
       const nameKeys = ["course_name", "courseName", "classroom_name", "classroomName"];
       const names = nameKeys.map((key) => query.get(key));
@@ -3927,11 +3937,8 @@
           field.getAttribute("data-classroom-name") ||
           field.getAttribute("content") || field.innerText || field.textContent);
       }
-      const matches = this.courses.filter((course) => names.some((name) =>
-        String(name || "").replace(/\s/g, "").includes(course),
-      ));
       if (names.some((name) => String(name || "").trim())) {
-        return matches.length === 1 ? matches[0] : "";
+        return matchNames(names);
       }
 
       const headings = [doc.title, ...[...doc.querySelectorAll(

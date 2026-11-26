@@ -297,7 +297,7 @@ ai-workspace 视频（`AiWorkspaceRunner.handleMedia`）中，xt 播放器真正
 
 `Solver` 负责作业页的截图/文本答题，以及讨论区的纯文本回复生成。
 
-作业入口先由 `QuestionBanks.getCourse()` 按课程名称匹配工程伦理或中国式现代化。V2 目录在同一课堂的 `pendingAutoStart` 中保存课程名，供作业页续跑时读取。两套题库都内嵌在用户脚本中。`QuestionBanks.findAnswer()` 核对题型、题干和选项文字，用页面选项下标提交。查不到唯一答案时进入 AI 流程。实际雨课堂页面的课程名识别和题库提交效果待实机验证。
+作业入口由 `QuestionBanks.getCourse()` 优先读取 `.learning-space-header__primary`，按课程名称匹配工程伦理或中国式现代化。页眉没有课程名时，再读取 URL、页面元数据与标题，最后使用同一课堂的 `pendingAutoStart`。两套题库都内嵌在用户脚本中。`QuestionBanks.findAnswer()` 核对题型、题干和选项文字，用页面选项下标提交。查不到唯一答案时进入 AI 流程。用 `node scripts/course-detection-selftest.cjs` 检查课程识别。题库提交效果待实机验证。
 
 主流程：
 
