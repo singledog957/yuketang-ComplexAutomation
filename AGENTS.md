@@ -80,7 +80,7 @@ userscript 以 IIFE 形式在 `*.yuketang.cn` 页面以 `@run-at document-start`
 - 启动链：
   `function boot|function start|function createPanel`
 - 核心单例：
-  `const Config|const Utils|const Store|const FailGate|const PauseGate|const StopGate|const Player|const AiWorkspace|const Solver|const Decipherer`
+  `const Config|const Utils|const Store|const FailGate|const PauseGate|const StopGate|const Player|const AiWorkspace|const Solver|const QuestionBanks|const Decipherer`
 - 路由 runner：
   `class V2Runner|class ProOldRunner|class ProNewRunner|class AiWorkspaceRunner`
 - ai-workspace 叶子遍历：
@@ -297,6 +297,8 @@ ai-workspace 视频（`AiWorkspaceRunner.handleMedia`）中，xt 播放器真正
 
 `Solver` 负责作业页的截图/文本答题，以及讨论区的纯文本回复生成。
 
+作业入口先由 `QuestionBanks.getCourse()` 按课程名称匹配工程伦理或中国式现代化。V2 目录在同一课堂的 `pendingAutoStart` 中保存课程名，供作业页续跑时读取。两套题库都内嵌在用户脚本中。`QuestionBanks.findAnswer()` 核对题型、题干和选项文字，用页面选项下标提交。查不到唯一答案时进入 AI 流程。实际雨课堂页面的课程名识别和题库提交效果待实机验证。
+
 主流程：
 
 1. 检测题型；启用「填空/主观题优先发送文字」且题干 DOM 有有效文字、无图片/公式等视觉内容时，按空位顺序插入 `【空N】` 并用文本请求。每次发送前都在面板日志打印读取到的题目文字。
@@ -334,7 +336,7 @@ API 行为：
   - ② 题面指纹变了（`AiWorkspace.exerciseFingerprint`）——**站点提交成功会自己翻到下一题**（2026-09-13 实机观测，见 `OBSERVE.md`），此时 ① 里的「当前题面」判据读到的是下一题、永远看不到回写，光靠 ① 会把已成功的提交判成未推进（进而 `allSubmitted=false`、`progressed=false`、目录侧失败计数不清零，整份作业被 `maxAttempts` 跳过）。靠 ② 确认时另打一条 info 日志写明是靠翻页推断的。
     两条都不中则打 warning 并返回 `false`。
 
-`solveExerciseQuestion(root, label, tab, index)` 的后两个参数就是给这次复核用的，由 `handleExercise` 的题号列表循环传入；无题号列表的路径没有 tab，只能退回纯 DOM 的 `isExerciseAnswered()`。`handleExercise` 会汇总每题结果：有一题没确认成功就返回 `false`（只是日志与返回值更诚实，流程不变——仍 `returnToSource` 重载目录，由目录重扫 + FailGate 兜底）。
+`solveExerciseQuestion(root, bank, label, tab, index)` 的后两个参数就是给这次复核用的，由 `handleExercise` 的题号列表循环传入；无题号列表的路径没有 tab，只能退回纯 DOM 的 `isExerciseAnswered()`。`handleExercise` 会汇总每题结果：有一题没确认成功就返回 `false`（只是日志与返回值更诚实，流程不变——仍 `returnToSource` 重载目录，由目录重扫 + FailGate 兜底）。
 
 **正因为站点提交后会自己翻页**，无题号列表路径的 `advanceExerciseQuestion(root, previousFingerprint)` 必须先看题面指纹有没有变：变了就直接算已推进、**不再点「下一题」**（否则一次提交推进两题，新翻到的那题整题漏答——2026-09-13 实机 bug）。
 

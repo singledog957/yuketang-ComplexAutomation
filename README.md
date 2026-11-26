@@ -18,6 +18,7 @@
 - 批量章节自动展开，逐个处理内部视频、音频、图文、作业与讨论。
 - 讨论区（`taolun` / `forum`）读取教师正文，用文本请求让模型生成回复，填入回复框发表；关闭 AI 自动作答时改为跳过。
 - PPT / 课件自动翻页与播放。
+- 工程伦理和中国式现代化作业优先查内置题库，覆盖单选、多选和判断题。根据题干关键词及选项文字匹配，选项乱序时按页面上的顺序作答。查不到可用答案时调用 AI。
 - 作业支持选择题、多选题、判断题、填空题和主观题；填空/主观题可优先发送文字，文本答案格式不合格时回退题面截图。
 - 接口支持 Chat Completions 与 Responses 两种格式，自动补全端点；鉴权支持 Bearer、`x-api-key`、`api-key`，可自动识别。
 - 支持 thinking / CoT、流式传输与自定义 max tokens。
@@ -36,10 +37,9 @@
 ## 安装 & 使用
 
 1. 安装 Tampermonkey 等 userscript 管理器。
-2. 打开 `yuketang-ComplexAutomation.user.js` 并安装脚本。
+2. 打开并安装 [yuketang-ComplexAutomation.user.js](https://raw.githubusercontent.com/singledog957/yuketang-ComplexAutomation/main/yuketang-ComplexAutomation.user.js)。
 3. 进入雨课堂课程目录页，点击脚本面板中的 `模型设置`。
-4. 填入 API URL、API Key、模型名称，按需调整接口格式、鉴权方式、最大 Token，以及 thinking、流式传输、自动作答。
-
+4. 按需开启自动作答。内置题库在本地检索，需要 AI 作答或回复讨论时填入 API URL、API Key 和模型名称。
 5. 点击 `开始`。
 
 「填空/主观题优先发送文字」默认开启：题面有可读文字且没有图片或公式时，先把题干与 `【空N】` 位置发给模型；每次请求前在日志显示题目文字。文本返回不是完整 JSON 或填空数量不符时自动改用截图。主观题要求简短连续正文，写入 UEditor 后仍需页面的逐题提交控件确认完成。
@@ -79,11 +79,13 @@ API URL 可以填完整端点，也可以只填域名或基础路径，脚本按
 
 - 在课程目录页启动。V2 内容页（`/v2/web/*` 且没有 `.logs-list`）会拒绝启动；`ai-workspace/lms-graph/*` 页面可以直接启动，脚本会按该页左侧的知识点列表依次处理。
 - 首次使用先只开视频 / PPT 流程，确认目录能正常返回与续跑后，再开启 AI 自动作答。
-- 作业答题依赖截图识别：窗口尺寸变化、题面被遮挡、页面未加载完、模型不支持图片都会导致失败。
+- 截图答题受窗口尺寸、题面遮挡、页面加载状态及模型图片支持情况影响。
 - 讨论要求提交附件这类模型做不到的事时，会返回拒答标记 `{refuse}`；脚本不发表回复，把该条目标记为需人工处理。
 - 日志出现 `XXX 连续 3 轮未推进，跳过`，多为该项已过截止或模型答不全；确认无误后可点 `清除失败记录` 重试。
 
 ## 来源与许可
+
+脚本作者为 Optance（nagelanping）和 SingleDog。
 
 本项目是综合改造版本，参考并继承了以下本地脚本的设计和部分逻辑：
 
@@ -92,6 +94,11 @@ API URL 可以填完整端点，也可以只填域名或基础路径，脚本按
 - `ref/雨课堂 MiMo AI 自动刷题 v5.2 (多选支持).js`
 
 项目按 GPL-3.0 license 发布。`ref/` 下各原始项目保留其原始声明与许可证信息。
+
+## 致谢
+
+- 感谢 pridezzh 整理北航《中国式现代化的理论与实践》题库。[buaa-chinese-modernization](https://github.com/pridezzh/buaa-chinese-modernization)
+- 感谢 kieran0625 整理北航《工程伦理》题库。[buaa-engineering-ethics](https://github.com/kieran0625/buaa-engineering-ethics)
 
 ## 免责声明
 

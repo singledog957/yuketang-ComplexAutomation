@@ -11,11 +11,11 @@ const grab = (start, end) => {
   return source.slice(from, to);
 };
 const Solver = eval(`({
-${grab("    getWrittenQuestionText(itemBodyElement, questionType) {", "    getVisibleOptionCount(")}
+${grab("    getWrittenQuestionText(", "    getVisibleOptionCount(")}
 ${grab("    detectQuestionType(itemBodyElement) {", "    parseWrittenAnswer(")}
 ${grab("    parseWrittenAnswer(raw, questionType, blankCount = 0) {", "    async fillBlanks(")}
 })`);
-const submitStart = source.indexOf("    async autoSelectAndSubmit(aiResponse, itemBodyElement) {");
+const submitStart = source.indexOf("    async autoSelectAndSubmit(");
 const submitEnd = source.indexOf("\n  };", submitStart);
 assert(submitStart >= 0 && submitEnd > submitStart);
 Object.assign(Solver, eval(`({${source.slice(submitStart, submitEnd)}})`));
